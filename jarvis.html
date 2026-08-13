@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A.R.I.A. — Asistente Personal</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;500;600;700&display=swap');
+
+  :root{
+    --bg: #060a10;
+    --panel: #0b121c;
+    --cyan: #4fe3f2;
+    --cyan-dim: #1f5d66;
+    --amber: #ffb454;
+    --text: #dceef4;
+    --text-dim: #6f8fa0;
+    --danger: #ff5f6d;
+  }
+
+  *{ box-sizing: border-box; }
+
+  body{
+    margin:0;
+    min-height:100vh;
+    background:
+      radial-gradient(circle at 50% 15%, rgba(79,227,242,0.08), transparent 60%),
+      var(--bg);
+    color: var(--text);
+    font-family: 'Rajdhani', sans-serif;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    padding: 24px 16px 40px;
+  }
+
+  .eyebrow{
+    font-family:'Share Tech Mono', monospace;
+    letter-spacing: 4px;
+    font-size: 11px;
+    color: var(--cyan-dim);
+    margin-top: 6px;
+  }
+
+  h1{
+    font-weight:700;
+    font-size: 26px;
+    letter-spacing: 2px;
+    margin: 4px 0 2px;
+    color: var(--cyan);
+    text-shadow: 0 0 18px rgba(79,227,242,0.45);
+  }
+
+  .status-line{
+    font-family:'Share Tech Mono', monospace;
+    font-size: 12px;
+    color: var(--text-dim);
+    margin-bottom: 22px;
+    height: 16px;
+  }
+
+  /* Reactor */
+  .reactor-wrap{
+    position:relative;
+    width: 190px; height: 190px;
+    display:flex; align-items:center; justify-content:center;
+    margin-bottom: 22px;
+  }
+  .ring{
+    position:absolute;
+    border-radius:50%;
+    border: 1.5px solid var(--cyan-dim);
+  }
+  .ring.r1{ width:190px; height:190px; }
+  .ring.r2{ width:150px; height:150px; border-style:dashed; opacity:.6; }
+  .ring.r3{ width:110px; height:110px; }
+  .core{
+    width: 78px; height:78px;
+    border-radius:50%;
+    background: radial-gradient(circle at 40% 35%, #fff, var(--cyan) 40%, #0a3a40 100%);
+    box-shadow: 0 0 30px rgba(79,227,242,0.55), 0 0 70px rgba(79,227,242,0.25);
+    transition: box-shadow .15s ease, transform .15s ease;
+  }
+  .reactor-wrap.listening .core{
+    animation: pulse 1.1s ease-in-out infinite;
+  }
+  .reactor-wrap.listening .ring{
+    animation: spin 6s linear infinite;
+  }
+  .reactor-wrap.speaking .core{
+    animation: pulse 0.5s ease-in-out infinite;
+  }
+  @keyframes pulse{
+    0%,100%{ transform:scale(1); box-shadow:0 0 30px rgba(79,227,242,0.55),0 0 70px rgba(79,227,242,0.25);}
+    50%{ transform:scale(1.12); box-shadow:0 0 45px rgba(79,227,242,0.85),0 0 100px rgba(79,227,242,0.4);}
+  }
+  @keyframes spin{ from{transform:rotate(0)} to{transform:rotate(360deg)} }
+
+  .mic-btn{
+    position:absolute;
+    bottom:-4px;
+    background: var(--panel);
+    border: 1px solid var(--cyan-dim);
+    color: var(--cyan);
+    width: 44px; height:44px;
+    border-radius:50%;
+    font-size: 18px;
+    cursor:pointer;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .mic-btn:active{ transform: scale(0.94); }
+  .mic-btn.on{ background: var(--cyan); color:#03181b; box-shadow:0 0 18px rgba(79,227,242,.6); }
+
+  /* Panel */
+  .panel{
+    width: 100%; max-width: 480px;
+    background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent), var(--panel);
+    border: 1px solid rgba(79,227,242,0.15);
+    border-radius: 10px;
+    padding: 14px;
+  }
+
+  .log{
+    height: 260px;
+    overflow-y:auto;
+    padding-right: 4px;
+    margin-bottom: 12px;
+    display:flex;
+    flex-direction:column;
+    gap:8px;
+  }
+  .log::-webkit-scrollbar{ width:4px; }
+  .log::-webkit-scrollbar-thumb{ background: var(--cyan-dim); border-radius:2px; }
+
+  .bubble{
+    font-size: 14px;
+    line-height:1.4;
+    padding: 8px 12px;
+    border-radius: 8px;
+    max-width: 90%;
+  }
+  .bubble.user{
+    align-self:flex-end;
+    background: rgba(79,227,242,0.12);
+    border: 1px solid rgba(79,227,242,0.25);
+  }
+  .bubble.aria{
+    align-self:flex-start;
+    background: rgba(255,180,84,0.08);
+    border: 1px solid rgba(255,180,84,0.2);
+    color: var(--amber);
+  }
+  .bubble .tag{
+    font-family:'Share Tech Mono', monospace;
+    font-size: 9px;
+    letter-spacing:1px;
+    display:block;
+    opacity:.6;
+    margin-bottom:2px;
+  }
+
+  form{ display:flex; gap:8px; }
+  input[type=text]{
+    flex:1;
+    background: #05090e;
+    border: 1px solid rgba(79,227,242,0.2);
+    border-radius: 6px;
+    padding: 10px 12px;
+    color: var(--text);
+    font-family:'Rajdhani',sans-serif;
+    font-size: 15px;
+    outline:none;
+  }
+  input[type=text]:focus{ border-color: var(--cyan); }
+  button.send{
+    background: var(--cyan);
+    border:none;
+    color:#03181b;
+    font-weight:700;
+    padding: 0 16px;
+    border-radius:6px;
+    cursor:pointer;
+    font-family:'Rajdhani',sans-serif;
+  }
+
+  .hint{
+    font-family:'Share Tech Mono', monospace;
+    font-size: 10px;
+    color: var(--text-dim);
+    margin-top:10px;
+    line-height:1.7;
+  }
+  .hint b{ color: var(--cyan-dim); }
+</style>
+</head>
+<body>
+
+  <div class="eyebrow">SISTEMA DE ASISTENCIA PERSONAL</div>
+  <h1>A.R.I.A.</h1>
+  <div class="status-line" id="statusLine">en espera</div>
+
+  <div class="reactor-wrap" id="reactorWrap">
+    <div class="ring r1"></div>
+    <div class="ring r2"></div>
+    <div class="ring r3"></div>
+    <div class="core"></div>
+    <button class="mic-btn" id="micBtn" title="Hablar">🎤</button>
+  </div>
+
+  <div class="panel">
+    <div class="log" id="log"></div>
+    <form id="form">
+      <input type="text" id="input" placeholder="Escribe o di: 'recuerda que...'" autocomplete="off">
+      <button class="send" type="submit">Enviar</button>
+    </form>
+    <div class="hint">
+      <b>recuerda [algo]</b> — guarda un dato · <b>qué recuerdas de [tema]</b> — busca · <b>lista todo</b> — muestra todo lo guardado · <b>olvida [tema]</b> — borra
+    </div>
+  </div>
+
+<script>
+const log = document.getElementById('log');
+const form = document.getElementById('form');
+const input = document.getElementById('input');
+const micBtn = document.getElementById('micBtn');
+const reactorWrap = document.getElementById('reactorWrap');
+const statusLine = document.getElementById('statusLine');
+
+function addBubble(text, who){
+  const b = document.createElement('div');
+  b.className = 'bubble ' + who;
+  const tag = document.createElement('span');
+  tag.className = 'tag';
+  tag.textContent = who === 'user' ? 'TÚ' : 'A.R.I.A.';
+  b.appendChild(tag);
+  const body = document.createElement('span');
+  body.textContent = text;
+  b.appendChild(body);
+  log.appendChild(b);
+  log.scrollTop = log.scrollHeight;
+}
+
+function speak(text){
+  if(!('speechSynthesis' in window)) return;
+  reactorWrap.classList.add('speaking');
+  const utter = new SpeechSynthesisUtterance(text);
+  utter.lang = 'es-ES';
+  utter.rate = 1.02;
+  utter.onend = () => reactorWrap.classList.remove('speaking');
+  speechSynthesis.speak(utter);
+}
+
+function say(text){
+  addBubble(text, 'aria');
+  speak(text);
+}
+
+// ---- Almacenamiento persistente ----
+async function saveMemory(topic, content){
+  const key = 'memoria:' + topic.toLowerCase().trim().replace(/\s+/g,'_') + ':' + Date.now();
+  try{
+    await window.storage.set(key, JSON.stringify({ topic, content, ts: Date.now() }), false);
+    return true;
+  }catch(e){
+    console.error('Error al guardar', e);
+    return false;
+  }
+}
+
+async function getAllMemories(){
+  try{
+    const listing = await window.storage.list('memoria:', false);
+    if(!listing || !listing.keys) return [];
+    const results = [];
+    for(const k of listing.keys){
+      try{
+        const r = await window.storage.get(k, false);
+        if(r && r.value) results.push(JSON.parse(r.value));
+      }catch(e){ /* clave inválida, se ignora */ }
+    }
+    results.sort((a,b) => a.ts - b.ts);
+    return results;
+  }catch(e){
+    console.error('Error al listar', e);
+    return [];
+  }
+}
+
+async function deleteMemoriesMatching(term){
+  const all = await getAllMemories();
+  const listing = await window.storage.list('memoria:', false);
+  if(!listing || !listing.keys) return 0;
+  let count = 0;
+  for(let i=0; i<listing.keys.length; i++){
+    const k = listing.keys[i];
+    try{
+      const r = await window.storage.get(k, false);
+      if(r && r.value){
+        const mem = JSON.parse(r.value);
+        if(mem.topic.toLowerCase().includes(term) || mem.content.toLowerCase().includes(term)){
+          await window.storage.delete(k, false);
+          count++;
+        }
+      }
+    }catch(e){}
+  }
+  return count;
+}
+
+// ---- Interpretación de comandos ----
+async function handleCommand(raw){
+  const text = raw.trim();
+  const lower = text.toLowerCase();
+
+  // recuerda que X / recuerda X
+  let m = lower.match(/^recuerda(?:\s+que)?\s+(.+)/);
+  if(m){
+    const content = text.slice(text.toLowerCase().indexOf(m[1])).trim();
+    const topic = content.split(' ').slice(0,4).join(' ');
+    const ok = await saveMemory(topic, content);
+    say(ok ? `Anotado: "${content}".` : 'No pude guardar eso, intenta de nuevo.');
+    return;
+  }
+
+  // olvida X
+  m = lower.match(/^olvida\s+(.+)/);
+  if(m){
+    const count = await deleteMemoriesMatching(m[1].trim());
+    say(count > 0 ? `Eliminé ${count} recuerdo(s) sobre "${m[1].trim()}".` : `No encontré nada sobre "${m[1].trim()}".`);
+    return;
+  }
+
+  // lista todo / qué sabes / muéstrame todo
+  if(/^(lista todo|muéstrame todo|muestrame todo|qué sabes|que sabes)/.test(lower)){
+    const all = await getAllMemories();
+    if(all.length === 0){ say('Todavía no tengo nada guardado.'); return; }
+    const resumen = all.map(m => '• ' + m.content).join('\n');
+    addBubble(resumen, 'aria');
+    speak(`Tengo ${all.length} recuerdos guardados.`);
+    return;
+  }
+
+  // qué recuerdas de X / recuerdas X
+  m = lower.match(/^(?:qué recuerdas de|que recuerdas de|recuerdas)\s+(.+)/);
+  if(m){
+    const term = m[1].replace(/\?/g,'').trim();
+    const all = await getAllMemories();
+    const matches = all.filter(mem => mem.topic.toLowerCase().includes(term) || mem.content.toLowerCase().includes(term));
+    if(matches.length === 0){ say(`No tengo nada guardado sobre "${term}".`); return; }
+    matches.forEach(mm => addBubble(mm.content, 'aria'));
+    speak(matches.length === 1 ? matches[0].content : `Encontré ${matches.length} recuerdos sobre eso.`);
+    return;
+  }
+
+  say('Puedes decirme "recuerda que...", preguntarme "qué recuerdas de..." o pedir "lista todo".');
+}
+
+form.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const val = input.value.trim();
+  if(!val) return;
+  addBubble(val, 'user');
+  input.value = '';
+  statusLine.textContent = 'procesando...';
+  await handleCommand(val);
+  statusLine.textContent = 'en espera';
+});
+
+// ---- Reconocimiento de voz ----
+let recognition = null;
+let listening = false;
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+if(SR){
+  recognition = new SR();
+  recognition.lang = 'es-ES';
+  recognition.continuous = false;
+  recognition.interimResults = false;
+
+  recognition.onstart = () => {
+    listening = true;
+    micBtn.classList.add('on');
+    reactorWrap.classList.add('listening');
+    statusLine.textContent = 'escuchando...';
+  };
+  recognition.onend = () => {
+    listening = false;
+    micBtn.classList.remove('on');
+    reactorWrap.classList.remove('listening');
+    statusLine.textContent = 'en espera';
+  };
+  recognition.onresult = async (event) => {
+    const transcript = event.results[0][0].transcript;
+    addBubble(transcript, 'user');
+    statusLine.textContent = 'procesando...';
+    await handleCommand(transcript);
+    statusLine.textContent = 'en espera';
+  };
+  recognition.onerror = () => {
+    statusLine.textContent = 'no se entendió, intenta de nuevo';
+  };
+
+  micBtn.addEventListener('click', () => {
+    if(listening){ recognition.stop(); }
+    else{ recognition.start(); }
+  });
+} else {
+  micBtn.style.opacity = 0.35;
+  micBtn.title = 'Voz no disponible en este navegador';
+  micBtn.addEventListener('click', () => {
+    statusLine.textContent = 'reconocimiento de voz no disponible aquí';
+  });
+}
+
+// Mensaje inicial
+(async () => {
+  const all = await getAllMemories();
+  if(all.length > 0){
+    say(`Sistema en línea. Tengo ${all.length} recuerdos guardados. Di "lista todo" para verlos.`);
+  } else {
+    say('Sistema en línea. Dime "recuerda que..." para empezar a guardar información.');
+  }
+})();
+</script>
+</body>
+</html>
