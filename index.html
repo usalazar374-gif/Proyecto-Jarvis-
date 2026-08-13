@@ -224,10 +224,12 @@
       <input type="text" id="input" placeholder="Escribe o di: 'recuerda que...'" autocomplete="off">
       <button class="send" type="button" id="sendBtn">Enviar</button>
     </div>
-    <button class="wake-btn" id="wakeBtn" type="button">⚪ Modo "Aria" (siempre escuchando): apagado</button>
+    <button class="wake-btn" id="wakeBtn" type="button">⚪ Modo "Oye Cóndor" (siempre escuchando): apagado</button>
     <div class="hint">
-      <b>recuerda [algo]</b> — guarda un dato · <b>qué recuerdas de [tema]</b> — busca · <b>lista todo</b> — muestra todo lo guardado · <b>olvida [tema]</b> — borra<br>
-      Con el modo "Aria" activo, di: <b>"Aria, recuerda que..."</b> y responde por voz automáticamente, sin tocar nada.
+      <b>recuerda [algo]</b> — guarda · <b>qué recuerdas de [tema]</b> — busca · <b>lista todo</b> — muestra todo · <b>olvida [tema]</b> — borra<br>
+      <b>qué hora es</b> / <b>qué hora es en Tokio</b> · <b>qué fecha es</b> · <b>clima</b> / <b>clima en Madrid</b> · <b>pon una alarma para las 7:30 am</b><br>
+      <b>enciende/apaga la luz o la tele</b> — simulado, no controla dispositivos reales<br>
+      Con el modo "Oye Cóndor" activo, di: <b>"Oye Cóndor, recuerda que..."</b> y responde por voz automáticamente, sin tocar nada.
     </div>
   </div>
 
@@ -285,6 +287,60 @@ function say(text){
   speak(text);
 }
 
+function toSecondPerson(text){
+  const rules = [
+    [/\bmis\b/gi, 'tus'],
+    [/\bmío\b/gi, 'tuyo'], [/\bmía\b/gi, 'tuya'],
+    [/\bmíos\b/gi, 'tuyos'], [/\bmías\b/gi, 'tuyas'],
+    [/\bmi\b/gi, 'tu'],
+    [/\byo soy\b/gi, 'tú eres'], [/\bsoy\b/gi, 'eres'],
+    [/\byo tengo\b/gi, 'tú tienes'], [/\btengo\b/gi, 'tienes'],
+    [/\bme llamo\b/gi, 'te llamas'],
+    [/\bvivo\b/gi, 'vives'], [/\btrabajo\b/gi, 'trabajas'], [/\bestudio\b/gi, 'estudias'],
+    [/\bnací\b/gi, 'naciste'],
+    [/\bquiero\b/gi, 'quieres'], [/\bnecesito\b/gi, 'necesitas'],
+    [/\bme gustan\b/gi, 'te gustan'], [/\bme gusta\b/gi, 'te gusta'],
+  ];
+  let t = text;
+  rules.forEach(([re, rep]) => { t = t.replace(re, rep); });
+  return t;
+}
+
+function normalizeText(s){
+  return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
+}
+
+const TZ_MAP = {
+  'madrid':'Europe/Madrid', 'barcelona':'Europe/Madrid', 'londres':'Europe/London',
+  'paris':'Europe/Paris', 'roma':'Europe/Rome', 'berlin':'Europe/Berlin', 'moscu':'Europe/Moscow',
+  'nueva york':'America/New_York', 'los angeles':'America/Los_Angeles', 'chicago':'America/Chicago',
+  'miami':'America/New_York', 'ciudad de mexico':'America/Mexico_City', 'mexico':'America/Mexico_City',
+  'bogota':'America/Bogota', 'lima':'America/Lima', 'santiago':'America/Santiago',
+  'buenos aires':'America/Argentina/Buenos_Aires', 'sao paulo':'America/Sao_Paulo',
+  'rio de janeiro':'America/Sao_Paulo', 'caracas':'America/Caracas',
+  'tokio':'Asia/Tokyo', 'tokyo':'Asia/Tokyo', 'pekin':'Asia/Shanghai', 'beijing':'Asia/Shanghai',
+  'shanghai':'Asia/Shanghai', 'hong kong':'Asia/Hong_Kong', 'seul':'Asia/Seoul',
+  'dubai':'Asia/Dubai', 'nueva delhi':'Asia/Kolkata', 'delhi':'Asia/Kolkata', 'bangkok':'Asia/Bangkok',
+  'singapur':'Asia/Singapore', 'sidney':'Australia/Sydney', 'melbourne':'Australia/Melbourne',
+  'el cairo':'Africa/Cairo', 'johannesburgo':'Africa/Johannesburg'
+};
+
+const deviceState = { luz: false, tv: false };
+
+const activeAlarms = [];
+function beep(){
+  try{
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.frequency.value = 880;
+    osc.connect(gain); gain.connect(ctx.destination);
+    gain.gain.setValueAtTime(0.25, ctx.currentTime);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.6);
+  }catch(e){ console.warn('No se pudo reproducir el sonido de alarma', e); }
+}
+
 const hasRealStorage = !!(window.storage && window.storage.set && window.storage.get);
 const hasLocalStorage = (() => { try{ localStorage.setItem('__t','1'); localStorage.removeItem('__t'); return true; }catch(e){ return false; } })();
 const memoryFallback = new Map();
@@ -339,269 +395,4 @@ async function storageSet(key, value){
   return { key, value };
 }
 
-if(storageBroken){ warnFallbackOnce(); }
-
-async function readMemoriesRaw(){
-  try{
-    const r = await storageGet(MEMORIES_KEY);
-    if(r && r.value){
-      const parsed = JSON.parse(r.value);
-      if(Array.isArray(parsed)) return parsed;
-    }
-    return [];
-  }catch(e){
-    return [];
-  }
-}
-
-async function writeMemoriesRaw(list){
-  await storageSet(MEMORIES_KEY, JSON.stringify(list));
-  memoryFallback.set(MEMORIES_KEY, JSON.stringify(list));
-}
-
-async function saveMemory(topic, content){
-  try{
-    const list = await readMemoriesRaw();
-    list.push({ topic, content, ts: Date.now() });
-    await writeMemoriesRaw(list);
-    return { success: true };
-  }catch(e){
-    console.error('Error al guardar (incluso en memoria temporal):', e);
-    return { success: false, error: (e && e.message) ? e.message : String(e) };
-  }
-}
-
-async function getAllMemories(){
-  const list = await readMemoriesRaw();
-  return list.slice().sort((a,b) => a.ts - b.ts);
-}
-
-async function deleteMemoriesMatching(term){
-  try{
-    const list = await readMemoriesRaw();
-    const remaining = list.filter(mem =>
-      !(mem.topic.toLowerCase().includes(term) || mem.content.toLowerCase().includes(term))
-    );
-    const removed = list.length - remaining.length;
-    if(removed > 0) await writeMemoriesRaw(remaining);
-    return removed;
-  }catch(e){
-    console.error('Error al borrar', e);
-    return 0;
-  }
-}
-
-async function handleCommand(raw){
-  const text = raw.trim();
-  const lower = text.toLowerCase();
-
-  let m = lower.match(/^recuerda(?:\s+que)?\s+(.+)/);
-  if(m){
-    const content = text.slice(text.toLowerCase().indexOf(m[1])).trim();
-    const topic = content.split(' ').slice(0,4).join(' ');
-    const result = await saveMemory(topic, content);
-    say(result.success ? `Anotado: "${content}".` : `No pude guardar eso. Detalle técnico: ${result.error}`);
-    return;
-  }
-
-  m = lower.match(/^olvida\s+(.+)/);
-  if(m){
-    const count = await deleteMemoriesMatching(m[1].trim());
-    say(count > 0 ? `Eliminé ${count} recuerdo(s) sobre "${m[1].trim()}".` : `No encontré nada sobre "${m[1].trim()}".`);
-    return;
-  }
-
-  if(/^(lista todo|muéstrame todo|muestrame todo|qué sabes|que sabes)/.test(lower)){
-    const all = await getAllMemories();
-    if(all.length === 0){ say('Todavía no tengo nada guardado.'); return; }
-    const resumen = all.map(m => '• ' + m.content).join('\n');
-    addBubble(resumen, 'aria');
-    speak(`Tengo ${all.length} recuerdos guardados.`);
-    return;
-  }
-
-  m = lower.match(/^(?:qué recuerdas de|que recuerdas de|recuerdas)\s+(.+)/);
-  if(m){
-    const term = m[1].replace(/\?/g,'').trim();
-    const all = await getAllMemories();
-    const matches = all.filter(mem => mem.topic.toLowerCase().includes(term) || mem.content.toLowerCase().includes(term));
-    if(matches.length === 0){ say(`No tengo nada guardado sobre "${term}".`); return; }
-    matches.forEach(mm => addBubble(mm.content, 'aria'));
-    speak(matches.length === 1 ? matches[0].content : `Encontré ${matches.length} recuerdos sobre eso.`);
-    return;
-  }
-
-  say('Puedes decirme "recuerda que...", preguntarme "qué recuerdas de..." o pedir "lista todo".');
-}
-
-async function submitMessage(){
-  const val = input.value.trim();
-  if(!val) return;
-  addBubble(val, 'user');
-  input.value = '';
-  statusLine.textContent = 'procesando...';
-  try{
-    await handleCommand(val);
-  }catch(err){
-    console.error('Error procesando comando', err);
-    say('Tuve un problema procesando eso. Revisa la consola para más detalles.');
-  }
-  statusLine.textContent = 'en espera';
-}
-
-const sendBtn = document.getElementById('sendBtn');
-sendBtn.addEventListener('click', submitMessage);
-input.addEventListener('keydown', (e) => {
-  if(e.key === 'Enter'){
-    e.preventDefault();
-    submitMessage();
-  }
-});
-
-let recognition = null;
-let listening = false;
-const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-
-if(SR){
-  recognition = new SR();
-  recognition.lang = 'es-ES';
-  recognition.continuous = false;
-  recognition.interimResults = false;
-
-  recognition.onstart = () => {
-    listening = true;
-    micBtn.classList.add('on');
-    reactorWrap.classList.add('listening');
-    statusLine.textContent = 'escuchando...';
-  };
-  recognition.onend = () => {
-    listening = false;
-    micBtn.classList.remove('on');
-    reactorWrap.classList.remove('listening');
-    statusLine.textContent = 'en espera';
-  };
-  recognition.onresult = async (event) => {
-    const transcript = event.results[0][0].transcript;
-    addBubble(transcript, 'user');
-    statusLine.textContent = 'procesando...';
-    await handleCommand(transcript);
-    statusLine.textContent = 'en espera';
-  };
-  recognition.onerror = (event) => {
-    if(event.error === 'not-allowed' || event.error === 'permission-denied'){
-      statusLine.textContent = 'permiso de micrófono bloqueado';
-      say('No tengo permiso para usar el micrófono aquí. Revisa los permisos del navegador, o usa el campo de texto.');
-    } else if(event.error === 'no-speech'){
-      statusLine.textContent = 'no escuché nada, intenta de nuevo';
-    } else {
-      statusLine.textContent = 'error de voz: ' + event.error;
-    }
-  };
-
-  micBtn.addEventListener('click', () => {
-    if(listening){ recognition.stop(); }
-    else{ recognition.start(); }
-  });
-} else {
-  micBtn.style.opacity = 0.35;
-  micBtn.title = 'Voz no disponible en este navegador';
-  micBtn.addEventListener('click', () => {
-    statusLine.textContent = 'reconocimiento de voz no disponible aquí';
-  });
-}
-
-const wakeBtn = document.getElementById('wakeBtn');
-let wakeMode = false;
-let wakeRecognition = null;
-
-function updateWakeUI(){
-  wakeBtn.classList.toggle('on', wakeMode);
-  wakeBtn.textContent = wakeMode
-    ? '🟢 Modo "Aria" (siempre escuchando): encendido'
-    : '⚪ Modo "Aria" (siempre escuchando): apagado';
-  if(wakeMode){
-    reactorWrap.classList.add('listening');
-    statusLine.textContent = 'esperando... di "Aria"';
-  } else if(!listening){
-    reactorWrap.classList.remove('listening');
-    statusLine.textContent = 'en espera';
-  }
-  micBtn.disabled = wakeMode;
-}
-
-function buildWakeRecognition(){
-  const rec = new SR();
-  rec.lang = 'es-ES';
-  rec.continuous = true;
-  rec.interimResults = false;
-
-  rec.onresult = async (event) => {
-    for(let i = event.resultIndex; i < event.results.length; i++){
-      const res = event.results[i];
-      if(!res.isFinal) continue;
-      const transcript = res[0].transcript.trim();
-      const lower = transcript.toLowerCase();
-      const wake = lower.match(/\baria\b[,:]?\s*(.*)/);
-      if(!wake) continue;
-
-      const command = wake[1].trim();
-      addBubble(transcript, 'user');
-      statusLine.textContent = 'procesando...';
-      if(command){
-        await handleCommand(command);
-      } else {
-        say('Dime.');
-      }
-      statusLine.textContent = wakeMode ? 'esperando... di "Aria"' : 'en espera';
-    }
-  };
-
-  rec.onerror = (event) => {
-    if(event.error === 'not-allowed' || event.error === 'permission-denied'){
-      wakeMode = false;
-      updateWakeUI();
-      say('No tengo permiso de micrófono para el modo siempre escuchando. Revísalo en los ajustes del navegador.');
-    }
-  };
-
-  rec.onend = () => {
-    if(wakeMode){
-      try{ rec.start(); }catch(e){}
-    }
-  };
-
-  return rec;
-}
-
-if(SR){
-  wakeBtn.addEventListener('click', () => {
-    wakeMode = !wakeMode;
-    if(wakeMode){
-      if(listening) recognition.stop();
-      if(!wakeRecognition) wakeRecognition = buildWakeRecognition();
-      try{ wakeRecognition.start(); }catch(e){}
-      say('Modo Aria activado. Di "Aria" seguido de lo que necesites, por ejemplo: "Aria, recuerda que..."');
-    } else {
-      if(wakeRecognition){ try{ wakeRecognition.stop(); }catch(e){} }
-      say('Modo Aria desactivado.');
-    }
-    updateWakeUI();
-  });
-} else {
-  wakeBtn.disabled = true;
-  wakeBtn.textContent = '⚪ Modo "Aria": voz no disponible en este navegador';
-}
-
-(async () => {
-  const all = await getAllMemories();
-  const diag = ` [diagnóstico: storage-claude=${hasRealStorage}, localStorage=${hasLocalStorage}]`;
-  const modo = (storageBroken && !hasLocalStorage) ? ' (modo temporal: no se guardará entre sesiones aquí)' : '';
-  if(all.length > 0){
-    say(`Sistema en línea${modo}. Tengo ${all.length} recuerdos guardados. Di "lista todo" para verlos.${diag}`);
-  } else {
-    say(`Sistema en línea${modo}. Dime "recuerda que..." para empezar a guardar información.${diag}`);
-  }
-})();
-</script>
-</body>
-</html>
+if(storageBrok
