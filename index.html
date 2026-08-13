@@ -237,8 +237,8 @@
     <div class="hint">
       <b>recuerda [algo]</b> — guarda · <b>qué recuerdas de [tema]</b> — busca · <b>lista todo</b> — muestra todo · <b>olvida [tema]</b> — borra<br>
       <b>qué hora es</b> / <b>qué hora es en Tokio</b> · <b>qué fecha es</b> · <b>clima</b> / <b>clima en Madrid</b> · <b>pon una alarma para las 7:30 am</b><br>
-      <b>enciende/apaga la luz o la tele</b> — simulado, no controla dispositivos reales<br>
-      Con el modo "Oye Cóndor" activo, di: <b>"Oye Cóndor, recuerda que..."</b> y responde por voz automáticamente, sin tocar nada.
+      <b>busca [tema]</b> o simplemente pregúntale cualquier cosa — consulta Wikipedia · <b>enciende/apaga la luz o la tele</b> — simulado<br>
+      Con el modo "Oye Cóndor" activo, di: <b>"Oye Cóndor, recuerda que..."</b> y responde por voz automáticamente.
     </div>
   </div>
 
@@ -270,7 +270,6 @@ function pickVoice(){
   if(!('speechSynthesis' in window)) return;
   const voices = speechSynthesis.getVoices();
   if(!voices.length) return;
-  // Nombres que suelen indicar voz masculina en español según el navegador/SO
   const maleHints = /jorge|diego|pablo|carlos|juan|male|hombre|masculin/i;
   const femaleHints = /mónica|monica|paulina|female|mujer|femenin|helena|lucía|lucia|marisol/i;
   chosenVoice =
@@ -287,7 +286,7 @@ if('speechSynthesis' in window){
 
 function speak(text){
   if(!('speechSynthesis' in window)) return;
-  speechSynthesis.cancel(); // corta cualquier frase anterior para no solapar
+  speechSynthesis.cancel();
   reactorWrap.classList.add('speaking');
   const utter = new SpeechSynthesisUtterance(text);
   utter.lang = 'es-ES';
@@ -303,8 +302,6 @@ function say(text){
   speak(text);
 }
 
-// Convierte lo que el usuario dijo en primera persona a segunda persona,
-// para que A.R.I.A. responda "tu color favorito es..." en vez de repetir "mi color favorito es...".
 function toSecondPerson(text){
   const rules = [
     [/\bmis\b/gi, 'tus'],
@@ -324,7 +321,6 @@ function toSecondPerson(text){
   return t;
 }
 
-// Quita acentos para comparar nombres de ciudades sin importar cómo los escriba/diga el usuario
 function normalizeText(s){
   return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
 }
@@ -344,10 +340,7 @@ const TZ_MAP = {
   'el cairo':'Africa/Cairo', 'johannesburgo':'Africa/Johannesburg'
 };
 
-// ---- Dispositivos simulados (no controlan hardware real) ----
 const deviceState = { luz: false, tv: false };
-
-// ---- Alarmas (solo funcionan mientras esta página siga abierta) ----
 const activeAlarms = [];
 function beep(){
   try{
@@ -362,9 +355,6 @@ function beep(){
   }catch(e){ console.warn('No se pudo reproducir el sonido de alarma', e); }
 }
 
-// ---- Almacenamiento persistente (con auto-recuperación a memoria si window.storage falla) ----
-// Nota: se evita window.storage.list() porque en este entorno falla ("Unexpected response type").
-// Todos los recuerdos viven en UNA sola clave como lista JSON, usando solo get/set.
 const hasRealStorage = !!(window.storage && window.storage.set && window.storage.get);
 const hasLocalStorage = (() => { try{ localStorage.setItem('__t','1'); localStorage.removeItem('__t'); return true; }catch(e){ return false; } })();
 const memoryFallback = new Map();
@@ -432,14 +422,12 @@ async function readMemoriesRaw(){
     }
     return [];
   }catch(e){
-    // Clave aún no existe (primera vez): se trata como "sin recuerdos", sin error.
     return [];
   }
 }
 
 async function writeMemoriesRaw(list){
   await storageSet(MEMORIES_KEY, JSON.stringify(list));
-  // Siempre se mantiene también un espejo en memoria como respaldo extra dentro de la sesión.
   memoryFallback.set(MEMORIES_KEY, JSON.stringify(list));
 }
 
@@ -475,7 +463,30 @@ async function deleteMemoriesMatching(term){
   }
 }
 
-// ---- Interpretación de comandos ----
+// ---------- NUEVA FUNCIÓN: BÚSQUEDA EN WIKIPEDIA ----------
+async function searchWikipedia(query) {
+  try {
+    const url = `https://es.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(query)}?redirect=true`;
+    const response = await fetch(url);
+    if (!response.ok) {
+      if (response.status === 404) {
+        return { found: false, message: `No encontré información sobre "${query}" en Wikipedia.` };
+      }
+      return { found: false, message: `Error al consultar Wikipedia (código ${response.status}).` };
+    }
+    const data = await response.json();
+    if (data && data.extract) {
+      return { found: true, title: data.title, extract: data.extract };
+    } else {
+      return { found: false, message: `No encontré un resumen para "${query}".` };
+    }
+  } catch (e) {
+    console.error('Error en búsqueda Wikipedia:', e);
+    return { found: false, message: 'Error de red al buscar en Wikipedia.' };
+  }
+}
+// ---------------------------------------------------------
+
 async function handleCommand(raw){
   const text = raw.trim();
   const lower = text.toLowerCase();
@@ -577,222 +588,4 @@ async function handleCommand(raw){
   }
 
   // alarmas
-  m = lower.match(/^(?:pon(?:me)? una alarma|programa(?:me)? una alarma|alarma)\s+(?:para\s+)?(.+)/);
-  if(m){
-    const timeMatch = m[1].match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm|a\.m\.|p\.m\.)?/i);
-    if(!timeMatch){ say('No entendí la hora. Prueba: "pon una alarma para las 7:30 am".'); return; }
-    let hour = parseInt(timeMatch[1], 10);
-    const minute = timeMatch[2] ? parseInt(timeMatch[2], 10) : 0;
-    let ampm = timeMatch[3] ? timeMatch[3].toLowerCase().replace(/\./g,'') : null;
-    if(ampm === 'pm' && hour < 12) hour += 12;
-    if(ampm === 'am' && hour === 12) hour = 0;
-    const target = new Date();
-    target.setHours(hour, minute, 0, 0);
-    if(target <= new Date()) target.setDate(target.getDate() + 1);
-    const ms = target - new Date();
-    const label = `${String(hour).padStart(2,'0')}:${String(minute).padStart(2,'0')}`;
-    const timeoutId = setTimeout(() => {
-      beep();
-      say(`¡Es hora! Tu alarma de las ${label} está sonando.`);
-    }, ms);
-    activeAlarms.push({ label, timeoutId });
-    say(`Alarma programada para las ${label}. Debes mantener esta página abierta para que suene.`);
-    return;
-  }
-
-  if(/^(qué alarmas tengo|que alarmas tengo|mis alarmas)\??$/.test(lower)){
-    if(activeAlarms.length === 0){ say('No tienes alarmas activas.'); return; }
-    say(`Tienes ${activeAlarms.length} alarma(s): ${activeAlarms.map(a => a.label).join(', ')}. (Solo suenan si esta página sigue abierta.)`);
-    return;
-  }
-
-  // luz / tele (simulado, no controla dispositivos reales)
-  m = lower.match(/^(enciende|prende|apaga)\s+(?:la\s+)?(luz|luces|tele|televisión|television|tv)\b/);
-  if(m){
-    const device = /luz|luces/.test(m[2]) ? 'luz' : 'tv';
-    const turnOn = /enciende|prende/.test(m[1]);
-    deviceState[device] = turnOn;
-    const deviceName = device === 'luz' ? 'la luz' : 'la tele';
-    say(`${turnOn ? 'Encendiendo' : 'Apagando'} ${deviceName} (simulado). Para controlar un dispositivo real necesitarías conectarlo a algo como Google Home, Alexa o un enchufe inteligente compatible.`);
-    return;
-  }
-
-  say('Puedes decirme "recuerda que...", preguntarme "qué recuerdas de...", pedir "lista todo", "qué hora es", "clima en...", o "pon una alarma para...".');
-}
-
-async function submitMessage(){
-  const val = input.value.trim();
-  if(!val) return;
-  addBubble(val, 'user');
-  input.value = '';
-  statusLine.textContent = 'procesando...';
-  try{
-    await handleCommand(val);
-  }catch(err){
-    console.error('Error procesando comando', err);
-    say('Tuve un problema procesando eso. Revisa la consola para más detalles.');
-  }
-  statusLine.textContent = 'en espera';
-}
-
-const sendBtn = document.getElementById('sendBtn');
-sendBtn.addEventListener('click', submitMessage);
-input.addEventListener('keydown', (e) => {
-  if(e.key === 'Enter'){
-    e.preventDefault();
-    submitMessage();
-  }
-});
-
-// ---- Reconocimiento de voz ----
-let recognition = null;
-let listening = false;
-const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-
-if(SR){
-  recognition = new SR();
-  recognition.lang = 'es-ES';
-  recognition.continuous = false;
-  recognition.interimResults = false;
-
-  recognition.onstart = () => {
-    listening = true;
-    micBtn.classList.add('on');
-    reactorWrap.classList.add('listening');
-    statusLine.textContent = 'escuchando...';
-  };
-  recognition.onend = () => {
-    listening = false;
-    micBtn.classList.remove('on');
-    reactorWrap.classList.remove('listening');
-    statusLine.textContent = 'en espera';
-  };
-  recognition.onresult = async (event) => {
-    const transcript = event.results[0][0].transcript;
-    addBubble(transcript, 'user');
-    statusLine.textContent = 'procesando...';
-    await handleCommand(transcript);
-    statusLine.textContent = 'en espera';
-  };
-  recognition.onerror = (event) => {
-    if(event.error === 'not-allowed' || event.error === 'permission-denied'){
-      statusLine.textContent = 'permiso de micrófono bloqueado';
-      say('No tengo permiso para usar el micrófono aquí. Revisa los permisos del navegador, o usa el campo de texto.');
-    } else if(event.error === 'no-speech'){
-      statusLine.textContent = 'no escuché nada, intenta de nuevo';
-    } else {
-      statusLine.textContent = 'error de voz: ' + event.error;
-    }
-  };
-
-  micBtn.addEventListener('click', () => {
-    if(listening){ recognition.stop(); }
-    else{ recognition.start(); }
-  });
-} else {
-  micBtn.style.opacity = 0.35;
-  micBtn.title = 'Voz no disponible en este navegador';
-  micBtn.addEventListener('click', () => {
-    statusLine.textContent = 'reconocimiento de voz no disponible aquí';
-  });
-}
-
-// ---- Modo "Oye Cóndor" (siempre escuchando, activado con la palabra clave, como Alexa) ----
-const wakeBtn = document.getElementById('wakeBtn');
-let wakeMode = false;
-let wakeRecognition = null;
-
-function updateWakeUI(){
-  wakeBtn.classList.toggle('on', wakeMode);
-  wakeBtn.textContent = wakeMode
-    ? '🟢 Modo "Oye Cóndor" (siempre escuchando): encendido'
-    : '⚪ Modo "Oye Cóndor" (siempre escuchando): apagado';
-  if(wakeMode){
-    reactorWrap.classList.add('listening');
-    statusLine.textContent = 'esperando... di "Oye Cóndor"';
-  } else if(!listening){
-    reactorWrap.classList.remove('listening');
-    statusLine.textContent = 'en espera';
-  }
-  micBtn.disabled = wakeMode;
-}
-
-function buildWakeRecognition(){
-  const rec = new SR();
-  rec.lang = 'es-ES';
-  rec.continuous = true;
-  rec.interimResults = false;
-
-  rec.onresult = async (event) => {
-    for(let i = event.resultIndex; i < event.results.length; i++){
-      const res = event.results[i];
-      if(!res.isFinal) continue;
-      const transcript = res[0].transcript.trim();
-      const lower = transcript.toLowerCase();
-      // Acepta "oye cóndor", "oye condor", o solo "cóndor"/"condor" (por si la app corta el "oye")
-      const wake = lower.match(/\b(?:oye\s+)?c[oó]ndor\b[,:]?\s*(.*)/);
-      if(!wake) continue; // ignora todo lo que no incluya la palabra clave
-
-      const command = wake[1].trim();
-      addBubble(transcript, 'user');
-      statusLine.textContent = 'procesando...';
-      if(command){
-        await handleCommand(command);
-      } else {
-        say('Dime.');
-      }
-      statusLine.textContent = wakeMode ? 'esperando... di "Oye Cóndor"' : 'en espera';
-    }
-  };
-
-  rec.onerror = (event) => {
-    if(event.error === 'not-allowed' || event.error === 'permission-denied'){
-      wakeMode = false;
-      updateWakeUI();
-      say('No tengo permiso de micrófono para el modo siempre escuchando. Revísalo en los ajustes del navegador.');
-    }
-    // errores como 'no-speech' son normales en modo continuo; se ignoran y se reinicia solo
-  };
-
-  rec.onend = () => {
-    if(wakeMode){
-      try{ rec.start(); }catch(e){ /* ya estaba iniciado */ }
-    }
-  };
-
-  return rec;
-}
-
-if(SR){
-  wakeBtn.addEventListener('click', () => {
-    wakeMode = !wakeMode;
-    if(wakeMode){
-      if(listening) recognition.stop(); // evita dos reconocimientos a la vez
-      if(!wakeRecognition) wakeRecognition = buildWakeRecognition();
-      try{ wakeRecognition.start(); }catch(e){}
-      say('Modo Oye Cóndor activado. Di "Oye Cóndor" seguido de lo que necesites, por ejemplo: "Oye Cóndor, recuerda que..."');
-    } else {
-      if(wakeRecognition){ try{ wakeRecognition.stop(); }catch(e){} }
-      say('Modo Oye Cóndor desactivado.');
-    }
-    updateWakeUI();
-  });
-} else {
-  wakeBtn.disabled = true;
-  wakeBtn.textContent = '⚪ Modo "Oye Cóndor": voz no disponible en este navegador';
-}
-
-// Mensaje inicial
-(async () => {
-  const all = await getAllMemories();
-  const diag = ` [diagnóstico: storage-claude=${hasRealStorage}, localStorage=${hasLocalStorage}]`;
-  const modo = (storageBroken && !hasLocalStorage) ? ' (modo temporal: no se guardará entre sesiones aquí)' : '';
-  if(all.length > 0){
-    say(`Sistema en línea${modo}. Tengo ${all.length} recuerdos guardados. Di "lista todo" para verlos.${diag}`);
-  } else {
-    say(`Sistema en línea${modo}. Dime "recuerda que..." para empezar a guardar información.${diag}`);
-  }
-})();
-</script>
-</body>
-</html>
+  m = lower.match(/^(?:pon(?:me
