@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>A.R.I.A. — Asistente Personal</title>
+<title>U.B.H. — Asistente Personal</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Rajdhani:wght@400;500;600;700&display=swap');
 
@@ -216,7 +216,7 @@
 <body>
 
   <div class="eyebrow">SISTEMA DE ASISTENCIA PERSONAL</div>
-  <h1>A.R.I.A.</h1>
+  <h1>U.B.H.</h1>
   <div class="status-line" id="statusLine">en espera</div>
 
   <div class="reactor-wrap" id="reactorWrap">
@@ -259,7 +259,7 @@ function addBubble(text, who){
   b.className = 'bubble ' + who;
   const tag = document.createElement('span');
   tag.className = 'tag';
-  tag.textContent = who === 'user' ? 'TÚ' : 'A.R.I.A.';
+  tag.textContent = who === 'user' ? 'TÚ' : 'U.B.H.';
   b.appendChild(tag);
   const body = document.createElement('span');
   body.textContent = text;
@@ -270,6 +270,7 @@ function addBubble(text, who){
 
 // Selección de la mejor voz en español disponible en el navegador
 let chosenVoice = null;
+let suppressWakeRestart = false;
 function pickVoice(){
   if(!('speechSynthesis' in window)) return;
   const voices = speechSynthesis.getVoices();
@@ -293,12 +294,27 @@ function speak(text){
   if(!('speechSynthesis' in window)) return;
   speechSynthesis.cancel(); // corta cualquier frase anterior para no solapar
   reactorWrap.classList.add('speaking');
+  // Silencia el micrófono del modo "Juan" mientras habla, para que no se escuche a sí misma
+  // y se active sola por accidente al decir palabras parecidas.
+  if(wakeMode && wakeRecognition){
+    suppressWakeRestart = true;
+    try{ wakeRecognition.stop(); }catch(e){}
+  }
   const utter = new SpeechSynthesisUtterance(text);
   utter.lang = 'es-ES';
   if(chosenVoice) utter.voice = chosenVoice;
   utter.rate = 1.0;
   utter.pitch = 0.85;
-  utter.onend = () => reactorWrap.classList.remove('speaking');
+  utter.onend = () => {
+    reactorWrap.classList.remove('speaking');
+    // Reactiva el micrófono del modo "Juan" un momento después de terminar de hablar
+    if(wakeMode && wakeRecognition){
+      setTimeout(() => {
+        suppressWakeRestart = false;
+        try{ wakeRecognition.start(); }catch(e){}
+      }, 500);
+    }
+  };
   speechSynthesis.speak(utter);
 }
 
@@ -308,7 +324,7 @@ function say(text){
 }
 
 // Convierte lo que el usuario dijo en primera persona a segunda persona,
-// para que A.R.I.A. responda "tu color favorito es..." en vez de repetir "mi color favorito es...".
+// para que U.B.H. responda "tu color favorito es..." en vez de repetir "mi color favorito es...".
 function toSecondPerson(text){
   const rules = [
     [/\bmis\b/gi, 'tus'],
@@ -893,7 +909,7 @@ function buildWakeRecognition(){
   };
 
   rec.onend = () => {
-    if(wakeMode){
+    if(wakeMode && !suppressWakeRestart){
       try{ rec.start(); }catch(e){ /* ya estaba iniciado */ }
     }
   };
@@ -923,12 +939,11 @@ if(SR){
 // Mensaje inicial
 (async () => {
   const all = await getAllMemories();
-  const diag = ` [diagnóstico: storage-claude=${hasRealStorage}, localStorage=${hasLocalStorage}]`;
   const modo = (storageBroken && !hasLocalStorage) ? ' (modo temporal: no se guardará entre sesiones aquí)' : '';
   if(all.length > 0){
-    say(`Sistema en línea${modo}. Tengo ${all.length} recuerdos guardados. Di "lista todo" para verlos.${diag}`);
+    say(`Sistema en línea${modo}. Tengo ${all.length} recuerdos guardados. Di "lista todo" para verlos.`);
   } else {
-    say(`Sistema en línea${modo}. Dime "recuerda que..." para empezar a guardar información.${diag}`);
+    say(`Sistema en línea${modo}. Dime "recuerda que..." para empezar a guardar información.`);
   }
 })();
 </script>
