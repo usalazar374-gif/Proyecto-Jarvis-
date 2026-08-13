@@ -59,6 +59,7 @@
     height: 16px;
   }
 
+  /* Reactor */
   .reactor-wrap{
     position:relative;
     width: 190px; height: 190px;
@@ -80,9 +81,15 @@
     box-shadow: 0 0 30px rgba(79,227,242,0.55), 0 0 70px rgba(79,227,242,0.25);
     transition: box-shadow .15s ease, transform .15s ease;
   }
-  .reactor-wrap.listening .core{ animation: pulse 1.1s ease-in-out infinite; }
-  .reactor-wrap.listening .ring{ animation: spin 6s linear infinite; }
-  .reactor-wrap.speaking .core{ animation: pulse 0.5s ease-in-out infinite; }
+  .reactor-wrap.listening .core{
+    animation: pulse 1.1s ease-in-out infinite;
+  }
+  .reactor-wrap.listening .ring{
+    animation: spin 6s linear infinite;
+  }
+  .reactor-wrap.speaking .core{
+    animation: pulse 0.5s ease-in-out infinite;
+  }
   @keyframes pulse{
     0%,100%{ transform:scale(1); box-shadow:0 0 30px rgba(79,227,242,0.55),0 0 70px rgba(79,227,242,0.25);}
     50%{ transform:scale(1.12); box-shadow:0 0 45px rgba(79,227,242,0.85),0 0 100px rgba(79,227,242,0.4);}
@@ -104,6 +111,7 @@
   .mic-btn:active{ transform: scale(0.94); }
   .mic-btn.on{ background: var(--cyan); color:#03181b; box-shadow:0 0 18px rgba(79,227,242,.6); }
 
+  /* Panel */
   .panel{
     width: 100%; max-width: 480px;
     background: linear-gradient(180deg, rgba(255,255,255,0.02), transparent), var(--panel);
@@ -151,6 +159,7 @@
     margin-bottom:2px;
   }
 
+  form{ display:flex; gap:8px; }
   input[type=text]{
     flex:1;
     background: #05090e;
@@ -235,6 +244,7 @@
 
 <script>
 const log = document.getElementById('log');
+const form = document.getElementById('form');
 const input = document.getElementById('input');
 const micBtn = document.getElementById('micBtn');
 const reactorWrap = document.getElementById('reactorWrap');
@@ -254,13 +264,19 @@ function addBubble(text, who){
   log.scrollTop = log.scrollHeight;
 }
 
+// Selección de la mejor voz en español disponible en el navegador
 let chosenVoice = null;
 function pickVoice(){
   if(!('speechSynthesis' in window)) return;
   const voices = speechSynthesis.getVoices();
   if(!voices.length) return;
+  // Nombres que suelen indicar voz masculina en español según el navegador/SO
+  const maleHints = /jorge|diego|pablo|carlos|juan|male|hombre|masculin/i;
+  const femaleHints = /mónica|monica|paulina|female|mujer|femenin|helena|lucía|lucia|marisol/i;
   chosenVoice =
-    voices.find(v => /es-(mx|us|419)/i.test(v.lang)) ||
+    voices.find(v => /^es/i.test(v.lang) && maleHints.test(v.name)) ||
+    voices.find(v => /es-(mx|us|419)/i.test(v.lang) && !femaleHints.test(v.name)) ||
+    voices.find(v => v.lang && v.lang.toLowerCase().startsWith('es') && !femaleHints.test(v.name)) ||
     voices.find(v => v.lang && v.lang.toLowerCase().startsWith('es')) ||
     null;
 }
@@ -271,13 +287,13 @@ if('speechSynthesis' in window){
 
 function speak(text){
   if(!('speechSynthesis' in window)) return;
-  speechSynthesis.cancel();
+  speechSynthesis.cancel(); // corta cualquier frase anterior para no solapar
   reactorWrap.classList.add('speaking');
   const utter = new SpeechSynthesisUtterance(text);
   utter.lang = 'es-ES';
   if(chosenVoice) utter.voice = chosenVoice;
-  utter.rate = 1.02;
-  utter.pitch = 1.0;
+  utter.rate = 1.0;
+  utter.pitch = 0.85;
   utter.onend = () => reactorWrap.classList.remove('speaking');
   speechSynthesis.speak(utter);
 }
@@ -287,6 +303,8 @@ function say(text){
   speak(text);
 }
 
+// Convierte lo que el usuario dijo en primera persona a segunda persona,
+// para que A.R.I.A. responda "tu color favorito es..." en vez de repetir "mi color favorito es...".
 function toSecondPerson(text){
   const rules = [
     [/\bmis\b/gi, 'tus'],
@@ -306,6 +324,7 @@ function toSecondPerson(text){
   return t;
 }
 
+// Quita acentos para comparar nombres de ciudades sin importar cómo los escriba/diga el usuario
 function normalizeText(s){
   return s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim();
 }
@@ -325,8 +344,10 @@ const TZ_MAP = {
   'el cairo':'Africa/Cairo', 'johannesburgo':'Africa/Johannesburg'
 };
 
+// ---- Dispositivos simulados (no controlan hardware real) ----
 const deviceState = { luz: false, tv: false };
 
+// ---- Alarmas (solo funcionan mientras esta página siga abierta) ----
 const activeAlarms = [];
 function beep(){
   try{
@@ -341,6 +362,9 @@ function beep(){
   }catch(e){ console.warn('No se pudo reproducir el sonido de alarma', e); }
 }
 
+// ---- Almacenamiento persistente (con auto-recuperación a memoria si window.storage falla) ----
+// Nota: se evita window.storage.list() porque en este entorno falla ("Unexpected response type").
+// Todos los recuerdos viven en UNA sola clave como lista JSON, usando solo get/set.
 const hasRealStorage = !!(window.storage && window.storage.set && window.storage.get);
 const hasLocalStorage = (() => { try{ localStorage.setItem('__t','1'); localStorage.removeItem('__t'); return true; }catch(e){ return false; } })();
 const memoryFallback = new Map();
@@ -395,4 +419,162 @@ async function storageSet(key, value){
   return { key, value };
 }
 
-if(storageBrok
+if(storageBroken){
+  warnFallbackOnce();
+}
+
+async function readMemoriesRaw(){
+  try{
+    const r = await storageGet(MEMORIES_KEY);
+    if(r && r.value){
+      const parsed = JSON.parse(r.value);
+      if(Array.isArray(parsed)) return parsed;
+    }
+    return [];
+  }catch(e){
+    // Clave aún no existe (primera vez): se trata como "sin recuerdos", sin error.
+    return [];
+  }
+}
+
+async function writeMemoriesRaw(list){
+  await storageSet(MEMORIES_KEY, JSON.stringify(list));
+  // Siempre se mantiene también un espejo en memoria como respaldo extra dentro de la sesión.
+  memoryFallback.set(MEMORIES_KEY, JSON.stringify(list));
+}
+
+async function saveMemory(topic, content){
+  try{
+    const list = await readMemoriesRaw();
+    list.push({ topic, content, ts: Date.now() });
+    await writeMemoriesRaw(list);
+    return { success: true };
+  }catch(e){
+    console.error('Error al guardar (incluso en memoria temporal):', e);
+    return { success: false, error: (e && e.message) ? e.message : String(e) };
+  }
+}
+
+async function getAllMemories(){
+  const list = await readMemoriesRaw();
+  return list.slice().sort((a,b) => a.ts - b.ts);
+}
+
+async function deleteMemoriesMatching(term){
+  try{
+    const list = await readMemoriesRaw();
+    const remaining = list.filter(mem =>
+      !(mem.topic.toLowerCase().includes(term) || mem.content.toLowerCase().includes(term))
+    );
+    const removed = list.length - remaining.length;
+    if(removed > 0) await writeMemoriesRaw(remaining);
+    return removed;
+  }catch(e){
+    console.error('Error al borrar', e);
+    return 0;
+  }
+}
+
+// ---- Interpretación de comandos ----
+async function handleCommand(raw){
+  const text = raw.trim();
+  const lower = text.toLowerCase();
+
+  // recuerda que X / recuerda X
+  let m = lower.match(/^recuerda(?:\s+que)?\s+(.+)/);
+  if(m){
+    const content = text.slice(text.toLowerCase().indexOf(m[1])).trim();
+    const topic = content.split(' ').slice(0,4).join(' ');
+    const result = await saveMemory(topic, content);
+    say(result.success ? `Anotado: "${content}".` : `No pude guardar eso. Detalle técnico: ${result.error}`);
+    return;
+  }
+
+  // olvida X
+  m = lower.match(/^olvida\s+(.+)/);
+  if(m){
+    const count = await deleteMemoriesMatching(m[1].trim());
+    say(count > 0 ? `Eliminé ${count} recuerdo(s) sobre "${m[1].trim()}".` : `No encontré nada sobre "${m[1].trim()}".`);
+    return;
+  }
+
+  // lista todo / qué sabes / muéstrame todo
+  if(/^(lista todo|muéstrame todo|muestrame todo|qué sabes|que sabes)/.test(lower)){
+    const all = await getAllMemories();
+    if(all.length === 0){ say('Todavía no tengo nada guardado.'); return; }
+    const resumen = all.map(m => '• ' + toSecondPerson(m.content)).join('\n');
+    addBubble(resumen, 'aria');
+    speak(`Tengo ${all.length} recuerdos guardados.`);
+    return;
+  }
+
+  // qué recuerdas de X / recuerdas X
+  m = lower.match(/^(?:qué recuerdas de|que recuerdas de|recuerdas)\s+(.+)/);
+  if(m){
+    const term = m[1].replace(/\?/g,'').trim();
+    const all = await getAllMemories();
+    const matches = all.filter(mem => mem.topic.toLowerCase().includes(term) || mem.content.toLowerCase().includes(term));
+    if(matches.length === 0){ say(`No tengo nada guardado sobre "${term}".`); return; }
+    matches.forEach(mm => addBubble(toSecondPerson(mm.content), 'aria'));
+    speak(matches.length === 1 ? toSecondPerson(matches[0].content) : `Encontré ${matches.length} recuerdos sobre eso.`);
+    return;
+  }
+
+  // hora actual
+  if(/^(qué hora es|que hora es)\??$/.test(lower)){
+    const time = new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+    say(`Son las ${time}.`);
+    return;
+  }
+
+  // hora en otra ciudad
+  m = lower.match(/^(?:qué hora es en|que hora es en)\s+(.+)/);
+  if(m){
+    const cityRaw = m[1].replace(/\?/g,'').trim();
+    const tz = TZ_MAP[normalizeText(cityRaw)];
+    if(!tz){
+      say(`No tengo guardada la zona horaria de "${cityRaw}". Prueba con una ciudad grande como Madrid, Tokio o Nueva York.`);
+      return;
+    }
+    const time = new Intl.DateTimeFormat('es-ES', { timeZone: tz, hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date());
+    say(`Son las ${time} en ${cityRaw}.`);
+    return;
+  }
+
+  // fecha actual
+  if(/^(qué fecha es|que fecha es|qué día es|que día es|que dia es)\??$/.test(lower)){
+    const date = new Date().toLocaleDateString('es-ES', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+    say(`Hoy es ${date}.`);
+    return;
+  }
+
+  // clima (local o de una ciudad)
+  m = lower.match(/^(?:qué clima hace|que clima hace|cómo está el clima|como esta el clima|clima)(?:\s+en\s+(.+))?\s*\??$/);
+  if(m){
+    const city = m[1] ? m[1].trim() : null;
+    try{
+      let lat, lon, place;
+      if(city){
+        const geoRes = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(city)}&count=1&language=es&format=json`);
+        const geoData = await geoRes.json();
+        if(!geoData.results || !geoData.results.length){ say(`No encontré la ciudad "${city}".`); return; }
+        lat = geoData.results[0].latitude; lon = geoData.results[0].longitude; place = geoData.results[0].name;
+      } else {
+        if(!navigator.geolocation){ say('No puedo acceder a tu ubicación aquí. Dime una ciudad, por ejemplo: "clima en Madrid".'); return; }
+        const pos = await new Promise((res, rej) => navigator.geolocation.getCurrentPosition(res, rej, { timeout: 8000 }));
+        lat = pos.coords.latitude; lon = pos.coords.longitude; place = 'tu ubicación';
+      }
+      const wRes = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true`);
+      const wData = await wRes.json();
+      const cw = wData.current_weather;
+      if(!cw){ say('No pude obtener el clima ahora mismo.'); return; }
+      say(`En ${place} hay ${Math.round(cw.temperature)}°C, con viento de ${Math.round(cw.windspeed)} km/h.`);
+    }catch(e){
+      console.error('Error de clima', e);
+      say('No pude consultar el clima. Revisa tu conexión o el permiso de ubicación.');
+    }
+    return;
+  }
+
+  // alarmas
+  m = lower.match(/^(?:p
